@@ -69,6 +69,85 @@ def test_filter_tasks_by_completion() -> None:
     assert incomplete[0][1].completed is False
 
 
+def test_schedule_tasks_returns_chronological_order() -> None:
+    owner = OwnerInfo(name="Anato")
+    pet = Pet(name="Milo", birthday="2021-04-14", animal="Dog")
+
+    early_task = RigidTask(
+        name="Early walk",
+        description="Morning exercise",
+        duration=20,
+        ideal_time="07:00",
+        priority=4,
+        task_date=date(2026, 3, 30),
+    )
+    late_task = RigidTask(
+        name="Late feed",
+        description="Feed Milo",
+        duration=15,
+        ideal_time="18:00",
+        priority=2,
+        task_date=date(2026, 3, 30),
+    )
+    tomorrow_task = RigidTask(
+        name="Tomorrow checkup",
+        description="Vet appointment",
+        duration=30,
+        ideal_time="09:00",
+        priority=5,
+        task_date=date(2026, 3, 31),
+    )
+
+    pet.add_task(late_task)
+    pet.add_task(tomorrow_task)
+    pet.add_task(early_task)
+    owner.add_pet(pet)
+
+    scheduler = Scheduler(owner)
+    scheduled = scheduler.schedule_tasks()
+
+    assert [task.name for _, task in scheduled] == [
+        "Early walk",
+        "Late feed",
+        "Tomorrow checkup",
+    ]
+
+
+def test_scheduler_detects_duplicate_static_task_times() -> None:
+    owner = OwnerInfo(name="Anato")
+    pet = Pet(name="Milo", birthday="2021-04-14", animal="Dog")
+    task_date = date(2026, 3, 29)
+
+    first_task = StaticTask(
+        name="Med A",
+        description="Medication A",
+        duration=10,
+        ideal_time="09:00",
+        fixed_time="09:00",
+        task_date=task_date,
+    )
+    second_task = StaticTask(
+        name="Med B",
+        description="Medication B",
+        duration=10,
+        ideal_time="09:00",
+        fixed_time="09:00",
+        task_date=task_date,
+    )
+
+    pet.add_task(first_task)
+    pet.add_task(second_task)
+    owner.add_pet(pet)
+
+    scheduler = Scheduler(owner)
+    warnings = scheduler.detect_static_conflicts()
+
+    assert len(warnings) == 1
+    assert "09:00" in warnings[0]
+    assert "Med A" in warnings[0]
+    assert "Med B" in warnings[0]
+
+
 def test_detect_static_conflicts_returns_warning() -> None:
     owner = OwnerInfo(name="Anato")
     pet = Pet(name="Milo", birthday="2021-04-14", animal="Dog")
