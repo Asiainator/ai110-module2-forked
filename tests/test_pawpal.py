@@ -27,6 +27,7 @@ def test_adding_task_increases_task_count() -> None:
         duration=10,
         ideal_time="09:00",
         fixed_time="09:00",
+        priority=5,
     )
 
     pet.add_task(task)
@@ -124,6 +125,7 @@ def test_scheduler_detects_duplicate_static_task_times() -> None:
         duration=10,
         ideal_time="09:00",
         fixed_time="09:00",
+        priority=5,
         task_date=task_date,
     )
     second_task = StaticTask(
@@ -132,6 +134,7 @@ def test_scheduler_detects_duplicate_static_task_times() -> None:
         duration=10,
         ideal_time="09:00",
         fixed_time="09:00",
+        priority=5,
         task_date=task_date,
     )
 
@@ -159,6 +162,7 @@ def test_detect_static_conflicts_returns_warning() -> None:
         duration=10,
         ideal_time="09:00",
         fixed_time="09:00",
+        priority=5,
         task_date=task_date,
     )
     task2 = StaticTask(
@@ -167,6 +171,7 @@ def test_detect_static_conflicts_returns_warning() -> None:
         duration=15,
         ideal_time="09:00",
         fixed_time="09:00",
+        priority=5,
         task_date=task_date,
     )
 
@@ -208,5 +213,44 @@ def test_daily_task_recreates_after_completion() -> None:
     assert new_task.completed is False
     assert new_task.daily is True
     assert new_task.date == start_date + timedelta(days=1)
+
+
+def test_flexible_tasks_with_same_priority_get_different_times() -> None:
+    owner = OwnerInfo(name="Anato")
+    pet = Pet(name="Milo", birthday="2021-04-14", animal="Dog")
+
+    task1 = RigidTask(
+        name="Walk A",
+        description="Flexible walk A",
+        duration=30,
+        ideal_time="08:00",
+        priority=5,
+    )
+    task2 = RigidTask(
+        name="Walk B",
+        description="Flexible walk B",
+        duration=30,
+        ideal_time="08:00",
+        priority=5,
+    )
+    task3 = RigidTask(
+        name="Walk C",
+        description="Flexible walk C",
+        duration=30,
+        ideal_time="08:00",
+        priority=5,
+    )
+
+    pet.add_task(task1)
+    pet.add_task(task2)
+    pet.add_task(task3)
+    owner.add_pet(pet)
+
+    scheduler = Scheduler(owner)
+    schedule = scheduler.schedule_tasks()
+
+    times = [task.scheduled_time for _, task in schedule]
+    assert len(times) == 3
+    assert len(set(times)) == 3
 
 

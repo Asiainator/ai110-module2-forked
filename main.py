@@ -27,6 +27,7 @@ def main() -> None:
         duration=10,
         ideal_time="09:00",
         fixed_time="09:00",
+        priority=5,
         task_date=current_date,
     )
 
@@ -36,6 +37,7 @@ def main() -> None:
         duration=15,
         ideal_time="09:00",
         fixed_time="09:00",
+        priority=4,
         task_date=current_date,
     )
 
@@ -45,6 +47,7 @@ def main() -> None:
         duration=15,
         ideal_time="09:00",
         fixed_time="09:00",
+        priority=4,
         task_date=current_date,
     )
 
@@ -93,19 +96,19 @@ def main() -> None:
     print("Today's schedule (sorted by date and time):")
     for pet, task in schedule:
         task_date = task.date.isoformat()
-        time_string = getattr(task, "fixed_time", task.ideal_time)
+        time_string = getattr(task, "scheduled_time", getattr(task, "fixed_time", task.ideal_time))
         print(f"- {task_date} {time_string} | {pet.name}: {task.name} ({task.description})")
 
     print("\nCompleted tasks:")
     for pet, task in scheduler.filter_tasks_by_completion(True):
         task_date = task.date.isoformat()
-        time_string = getattr(task, "fixed_time", task.ideal_time)
+        time_string = getattr(task, "scheduled_time", getattr(task, "fixed_time", task.ideal_time))
         print(f"- {task_date} {time_string} | {pet.name}: {task.name}")
 
     print("\nIncomplete tasks:")
     for pet, task in scheduler.filter_tasks_by_completion(False):
         task_date = task.date.isoformat()
-        time_string = getattr(task, "fixed_time", task.ideal_time)
+        time_string = getattr(task, "scheduled_time", getattr(task, "fixed_time", task.ideal_time))
         print(f"- {task_date} {time_string} | {pet.name}: {task.name}")
 
 

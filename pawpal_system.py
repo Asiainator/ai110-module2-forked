@@ -4,6 +4,21 @@ from datetime import date, timedelta
 from typing import List, Optional
 
 
+def _parse_time(time_str: str) -> int:
+    try:
+        hours, minutes = map(int, time_str.split(":"))
+        return hours * 60 + minutes
+    except ValueError:
+        return 0
+
+
+def _format_time(total_minutes: int) -> str:
+    total_minutes = total_minutes % (24 * 60)
+    hours = total_minutes // 60
+    minutes = total_minutes % 60
+    return f"{hours:02d}:{minutes:02d}"
+
+
 class OwnerInfo:
     def __init__(self, name: str, pets: Optional[List[Pet]] = None):
         """Create an owner and optionally attach a list of pets."""
@@ -53,6 +68,7 @@ class Task(ABC):
         description: str,
         duration: int,
         ideal_time: str,
+        priority: int = 0,
         daily: bool = False,
         task_date: Optional[date] = None,
     ):
@@ -61,9 +77,11 @@ class Task(ABC):
         self.description = description
         self.duration = duration
         self.ideal_time = ideal_time
+        self.priority = priority
         self.daily = daily
         self.date = task_date or date.today()
         self.completed = False
+        self.scheduled_time = ideal_time
 
     def mark_complete(self, parent_pet: Optional[Pet] = None) -> None:
         """Mark this task as completed.
@@ -89,7 +107,7 @@ class Task(ABC):
         raise NotImplementedError
 
 
-class RigidTask(Task):
+class FlexibleTask(Task):
     def __init__(
         self,
         name: str,
@@ -100,12 +118,11 @@ class RigidTask(Task):
         daily: bool = False,
         task_date: Optional[date] = None,
     ):
-        """Create a rigid task with a priority and ideal time."""
-        super().__init__(name, description, duration, ideal_time, daily=daily, task_date=task_date)
-        self.priority = priority
+        """Create a flexible task with a priority and ideal time."""
+        super().__init__(name, description, duration, ideal_time, priority=priority, daily=daily, task_date=task_date)
 
-    def clone(self, next_day: bool = False) -> RigidTask:
-        return RigidTask(
+    def clone(self, next_day: bool = False) -> FlexibleTask:
+        return FlexibleTask(
             name=self.name,
             description=self.description,
             duration=self.duration,
@@ -116,11 +133,13 @@ class RigidTask(Task):
         )
 
     def describe(self) -> str:
-        """Return a description string for the rigid task."""
+        """Return a description string for the flexible task."""
         return (
-            f"RigidTask(name={self.name}, description={self.description}, "
+            f"FlexibleTask(name={self.name}, description={self.description}, "
             f"duration={self.duration}, ideal_time={self.ideal_time}, priority={self.priority})"
         )
+
+RigidTask = FlexibleTask
 
 
 class StaticTask(Task):
@@ -131,11 +150,12 @@ class StaticTask(Task):
         duration: int,
         ideal_time: str,
         fixed_time: str,
+        priority: int,
         daily: bool = False,
         task_date: Optional[date] = None,
     ):
         """Create a static task that should occur at a fixed time."""
-        super().__init__(name, description, duration, ideal_time, daily=daily, task_date=task_date)
+        super().__init__(name, description, duration, ideal_time, priority=priority, daily=daily, task_date=task_date)
         self.fixed_time = fixed_time
 
     def clone(self, next_day: bool = False) -> StaticTask:
@@ -145,6 +165,7 @@ class StaticTask(Task):
             duration=self.duration,
             ideal_time=self.ideal_time,
             fixed_time=self.fixed_time,
+            priority=self.priority,
             daily=self.daily,
             task_date=self._clone_date(next_day),
         )
@@ -163,13 +184,56 @@ class Scheduler:
         self.owner = owner
 
     def schedule_tasks(self) -> List[tuple[Pet, Task]]:
-        """Build and return a schedule sorted by each task's time."""
+        """Build and return a schedule sorted by each task's assigned time."""
         schedule: List[tuple[Pet, Task]] = []
         for pet in self.owner.list_pets():
+            tasks_by_date: dict[date, List[Task]] = {}
             for task in pet.list_tasks():
-                schedule.append((pet, task))
+                tasks_by_date.setdefault(task.date, []).append(task)
 
-        return self.sort_by_time(schedule)
+            for task_date in sorted(tasks_by_date):
+                schedule.extend(self._schedule_tasks_for_pet_date(pet, tasks_by_date[task_date]))
+
+        return sorted(
+            schedule,
+            key=lambda pair: (
+                pair[1].date,
+                _parse_time(getattr(pair[1], "scheduled_time", getattr(pair[1], "fixed_time", pair[1].ideal_time))),
+                -pair[1].priority,
+            ),
+        )
+
+    def _schedule_tasks_for_pet_date(self, pet: Pet, tasks: List[Task]) -> List[tuple[Pet, Task]]:
+        static_tasks = [task for task in tasks if isinstance(task, StaticTask)]
+        flex_tasks = [task for task in tasks if isinstance(task, FlexibleTask)]
+        other_tasks = [task for task in tasks if not isinstance(task, (StaticTask, FlexibleTask))]
+
+        scheduled: List[tuple[Pet, Task]] = []
+        occupied_ranges: List[tuple[int, int]] = []
+
+        for task in sorted(static_tasks, key=lambda t: _parse_time(t.fixed_time)):
+            task.scheduled_time = task.fixed_time
+            start = _parse_time(task.fixed_time)
+            occupied_ranges.append((start, start + task.duration))
+            scheduled.append((pet, task))
+
+        for task in sorted(flex_tasks, key=lambda t: (-t.priority, _parse_time(t.ideal_time), t.name)):
+            start = _parse_time(task.ideal_time)
+            while not self._is_slot_free(occupied_ranges, start, task.duration):
+                start += 1
+            task.scheduled_time = _format_time(start)
+            occupied_ranges.append((start, start + task.duration))
+            scheduled.append((pet, task))
+
+        for task in other_tasks:
+            task.scheduled_time = getattr(task, "scheduled_time", task.ideal_time)
+            scheduled.append((pet, task))
+
+        return scheduled
+
+    def _is_slot_free(self, occupied_ranges: List[tuple[int, int]], start: int, duration: int) -> bool:
+        end = start + duration
+        return all(end <= begin or start >= occupied for begin, occupied in occupied_ranges)
 
     def filter_tasks_by_completion(self, completed: bool) -> List[tuple[Pet, Task]]:
         """Return only the tasks whose completion status matches the requested value."""
@@ -180,31 +244,32 @@ class Scheduler:
         ]
 
     def sort_by_time(self, schedule: List[tuple[Pet, Task]]) -> List[tuple[Pet, Task]]:
-        """Return the schedule sorted by date and each task's HH:MM time string."""
+        """Return the schedule sorted by date and each task's assigned time string."""
         return sorted(
             schedule,
             key=lambda pair: (
                 pair[1].date,
-                getattr(pair[1], "fixed_time", pair[1].ideal_time),
+                _parse_time(getattr(pair[1], "scheduled_time", getattr(pair[1], "fixed_time", pair[1].ideal_time))),
+                -getattr(pair[1], "priority", 0),
             ),
         )
 
     def detect_static_conflicts(self) -> List[str]:
-        """Detect same-pet static task conflicts and return warnings."""
+        """Detect same-pet static task conflicts with equal priority and return warnings."""
         warnings: List[str] = []
         for pet in self.owner.list_pets():
-            tasks_by_slot: dict[tuple[date, str], List[StaticTask]] = {}
+            tasks_by_slot_priority: dict[tuple[date, str, int], List[StaticTask]] = {}
             for task in pet.list_tasks():
                 if isinstance(task, StaticTask):
-                    slot = (task.date, task.fixed_time)
-                    tasks_by_slot.setdefault(slot, []).append(task)
+                    slot = (task.date, task.fixed_time, task.priority)
+                    tasks_by_slot_priority.setdefault(slot, []).append(task)
 
-            for (task_date, fixed_time), tasks in tasks_by_slot.items():
+            for (task_date, fixed_time, priority), tasks in tasks_by_slot_priority.items():
                 if len(tasks) > 1:
                     task_names = ", ".join(task.name for task in tasks)
                     warnings.append(
                         f"Warning: {pet.name} has {len(tasks)} static tasks scheduled at "
-                        f"{task_date.isoformat()} {fixed_time}: {task_names}"
+                        f"{task_date.isoformat()} {fixed_time} with priority {priority}: {task_names}"
                     )
         return warnings
 
